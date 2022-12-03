@@ -1,0 +1,222 @@
+---
+title: "Analytic Hierarchy Process"
+author: "Lauren Harris and Kat Rosencrance"
+date: "10/20/2022"
+output: html_document
+---
+
+This code calculates aggregated preferences for 4 conservation criteria (water resources, climate resilience, biodiversity, agriculture) using an analytic hierarchy process, developed by Saaty in 1987 (https://doi.org/10.1016/0270-0255(87)90473-8). The second half of the code analyzes the impact of elevating indigenous voices on AHP aggregated weights. Data for this code is not included to protect respondent privacy. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages
+```{r}
+library(here) # for locating files
+library(tidyverse) # for everything else
+library(ahpsurvey) # for running the AHP (has some dependencies, may need to upload old version of some)
+library(kableExtra) # for making nice tables
+```
+
+## Prep
+
+Set variables
+```{r}
+# vector of which respondents are indigenous (1 = indigenous, 0 = non-indigenous)
+indigenous_vector <- c(0,0,0,1,0)
+```
+
+Read in data (5/6 responses received)
+```{r}
+responses <- read_csv(here("input_data", "endangermond_responses_october_2022.csv"))
+```
+
+Prep response data (data frame: responses_clean)
+```{r}
+responses <- janitor::clean_names(responses) # clean up the names 
+responses_only <- responses[,5:16] # select only these columns
+
+# rename the columns to what is being compared
+colnames(responses_only)[1] = "water_climate"
+colnames(responses_only)[2] = "water_climate_value"
+colnames(responses_only)[3] = "water_bio"
+colnames(responses_only)[4] = "water_bio_value"
+colnames(responses_only)[5] = "water_ag"
+colnames(responses_only)[6] = "water_ag_value"
+colnames(responses_only)[7] = "climate_bio"
+colnames(responses_only)[8] = "climate_bio_value"
+colnames(responses_only)[9] = "climate_ag"
+colnames(responses_only)[10] = "climate_ag_value"
+colnames(responses_only)[11] = "bio_ag"
+colnames(responses_only)[12] = "bio_ag_value"
+
+# Add a negative modifier for when they chose option B
+responses_only <- responses_only %>% 
+  mutate(water_climate = case_when(water_climate == "Water Resources" ~ 1, 
+                                    water_climate == "Climate Resilience" ~ -1),
+         water_bio = case_when(water_bio == "Water Resources" ~ 1, 
+                               water_bio == "Biodiversity" ~ -1),
+         water_ag = case_when(water_ag == "Water Resources" ~ 1, 
+                              water_ag == "Agriculture" ~ -1),
+         climate_bio = case_when(climate_bio == "Climate Resilience" ~ 1, 
+                                 climate_bio == "Biodiversity" ~ -1),
+         climate_ag = case_when(climate_ag == "Climate Resilience" ~ 1,
+                                climate_ag == "Agriculture" ~ -1),
+         bio_ag = case_when(bio_ag == "Biodiversity" ~ 1,
+                                bio_ag == "Agriculture" ~ -1))
+
+# rescale response values before multiplying by modifier (used points (1,1) and (10,9) in point-slope calculator)
+responses_only[seq(2, ncol(responses_only), by = 2)] <- (responses_only[seq(2, ncol(responses_only), by = 2)]*8/9)+(1/9)
+
+# make an empty dataframe with the right column names
+responses_clean <- matrix(NA, ncol = 6, nrow = nrow(responses)) # empty matrix
+responses_clean <- as.data.frame(responses_clean) # convert to data frame
+colnames(responses_clean) <- c("water_climate", "water_bio", "water_ag", "climate_bio", "climate_ag", "bio_ag") #rename
+
+# multiply the columns together to negate second options and put it in the new data frame
+responses_clean$water_climate <- responses_only$water_climate * responses_only$water_climate_value
+responses_clean$water_bio <- responses_only$water_bio * responses_only$water_bio_value
+responses_clean$water_ag <- responses_only$water_ag * responses_only$water_ag_value
+responses_clean$climate_bio <- responses_only$climate_bio * responses_only$climate_bio_value
+responses_clean$climate_ag <- responses_only$climate_ag * responses_only$climate_ag_value
+responses_clean$bio_ag <- responses_only$bio_ag * responses_only$bio_ag_value  
+
+# for any values that are -1, convert to 1
+responses_clean[responses_clean == -1] <- 1
+
+```
+
+Set up atts object (the order of the criteria for the paired comparisons, based on the order of survey questions)
+```{r}
+attributes <- c("Water", "Climate", "Biodiversity", "Agriculture")
+```
+
+## Equal stakeholder weight AHP
+
+Run these functions 
+
+- ahpsurvey::ahp (returns aggregated preferences, and preference score and consistency ratio per individual and paired comparison) 
+- ahpsurvey::ahp.mat (returns one comparison matrix per person)
+
+```{r}
+ahp_ind_agg <- ahp(df = responses_clean, atts = attributes, negconvert = FALSE, agg = TRUE, reciprocal = TRUE)
+ahp_matrix <- ahp.mat(df = responses_clean, atts = attributes, negconvert = FALSE, reciprocal = TRUE)
+```
+
+Print results from above
+```{r}
+ahp_ind_agg
+ahp_matrix
+```
+
+Scale to sum all aggregated preferences to 1 (for ease of comparison with 2nd AHP)
+```{r}
+# make the scaling factor
+scale_factor <- sum(ahp_ind_agg$aggpref[,1])
+
+# save the data frame as ahp_agg_pref_scaled_alpha_1
+ahp_agg_pref_scaled <- ahp_ind_agg$aggpref
+
+# multiply it by 1/scaling_factor
+ahp_agg_pref_scaled[,1] <- ahp_agg_pref_scaled[,1]*(1/scale_factor)
+
+# test that it sums to 1 (should return 1)
+sum(ahp_agg_pref_scaled[,1])
+```
+
+Make nice tables
+```{r}
+# for the aggregated preferences and SD
+ahp_agg_pref_scaled %>% 
+  kable(col.names = c("Aggregated Preference", "Standard Deviation"), digits = 3, caption = "Table 1. Scaled and aggregated AHP results for all respondents") %>% 
+  kable_styling(full_width = FALSE)
+
+# for the individual preferences and consistency ratio
+ahp_ind_agg$indpref[,1:5] %>% 
+  kable(col.names = c("Water", "Climate", "Biodiversity", "Agriculture", "Consistency Ratio"), digits = 3, caption = "Table 2. Individual AHP results and consistency ratios for all respondents") %>% 
+  kable_styling(full_width = FALSE)
+```
+
+Stats
+```{r}
+# mean consistency ratio
+mean(ahp_ind_agg$indpref[,5])
+
+# SD for consistency ratio
+sd(ahp_ind_agg$indpref[,5])
+```
+
+## Indigenous-elevated AHP
+
+Prep data: this chunk will duplicate responses from indigenous people
+```{r}
+# using the responses_clean
+responses_indig <- responses_clean 
+
+# bind a column using the vector of indigineity in 1st chunk
+responses_indig <- cbind(responses_indig, indigenous_vector)
+
+# create a subset of the clean responses for only rows where that new column equals one
+responses_indig_subset <- responses_indig[responses_indig$indigenous_vector == 1,]
+
+# append the datasets 
+responses_indig <- rbind(responses_indig, responses_indig_subset)
+
+# remove indigenous column
+responses_indig_clean <- responses_indig[,1:6]
+
+```
+
+Run these functions 
+
+- ahpsurvey::ahp (returns aggregated preferences, and preference score and consistency ratio per individual and paired comparison) 
+- ahpsurvey::ahp.mat (returns one comparison matrix per person)
+
+```{r}
+ahp_ind_agg_indig <- ahp(df = responses_indig_clean, atts = attributes, negconvert = FALSE, agg = TRUE, reciprocal = TRUE)
+ahp_matrix_indig <- ahp.mat(df = responses_indig_clean, atts = attributes, negconvert = FALSE, reciprocal = TRUE)
+```
+
+Print results from above
+```{r}
+ahp_ind_agg_indig 
+ahp_matrix_indig
+```
+
+Scale to sum all aggregated preferences to 1
+```{r}
+# make the scaling factor
+scale_factor_indig <- sum(ahp_ind_agg_indig$aggpref[,1])
+
+# save the data frame as ahp_agg_pref_scaled_alpha_1
+ahp_agg_pref_scaled_indig <- ahp_ind_agg_indig$aggpref
+
+# multiply it by 1/scaling_factor
+ahp_agg_pref_scaled_indig[,1] <- ahp_agg_pref_scaled_indig[,1]*(1/scale_factor_indig)
+
+# test that it sums to 1 (should return 1)
+sum(ahp_agg_pref_scaled_indig[,1])
+```
+
+Make nice tables
+```{r}
+# for the aggregated preferences and SD
+ahp_agg_pref_scaled_indig %>% 
+  kable(col.names = c("Aggregated Preference", "Standard Deviation"), digits = 3, caption = "Table 1. Scaled and aggregated AHP results with indigenous perspectives doubled") %>% 
+  kable_styling(full_width = FALSE)
+
+# for the individual preferences and consistency ratio
+ahp_ind_agg_indig$indpref[,1:5] %>% 
+  kable(col.names = c("Water", "Climate", "Biodiversity", "Agriculture", "Consistency Ratio"), digits = 3, caption = "Table 2. Individual AHP results and consistency ratios with indigenous perspectives doubled") %>% 
+  kable_styling(full_width = FALSE)
+```
+
+Stats
+```{r}
+# mean consistency ratio
+mean(ahp_ind_agg_indig$indpref[,5])
+
+# SD for consistency ratio
+sd(ahp_ind_agg_indig$indpref[,5])
+```
