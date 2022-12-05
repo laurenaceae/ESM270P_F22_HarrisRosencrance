@@ -5,8 +5,6 @@ date: "10/20/2022"
 output: html_document
 ---
 
-This code calculates aggregated preferences for 4 conservation criteria (water resources, climate resilience, biodiversity, agriculture) using an analytic hierarchy process, developed by Saaty in 1987 (https://doi.org/10.1016/0270-0255(87)90473-8). The second half of the code analyzes the impact of elevating indigenous voices on AHP aggregated weights. Data for this code is not included to protect respondent privacy. 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -27,7 +25,7 @@ Set variables
 indigenous_vector <- c(0,0,0,1,0)
 ```
 
-Read in data (5/6 responses received)
+Read in data
 ```{r}
 responses <- read_csv(here("input_data", "endangermond_responses_october_2022.csv"))
 ```
